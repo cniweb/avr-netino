@@ -1103,28 +1103,16 @@ static volatile byte watchdogCounter;
 void Sleepy::watchdogInterrupts (char mode) {
     // correct for the fact that WDP3 is *not* in bit position 3!
     if (mode & bit(3))
-        mode ^= bit(3) 
-#ifdef WDP3			// Mega8/32 don't have WDP3
-	  | bit(WDP3)
-#endif
-;
+        mode ^= bit(3) | bit(WDP3);
     // pre-calculate the WDTCSR value, can't do it inside the timed sequence
     // we only generate interrupts, no reset
-#ifdef WDIE
     byte wdtcsr = mode >= 0 ? bit(WDIE) | mode : 0;
-#else
-    byte wdtcsr = mode >= 0 ? mode : 0;
-#endif
     MCUSR &= ~(1<<WDRF);
     ATOMIC_BLOCK(ATOMIC_FORCEON) {
 #ifndef WDTCSR
 #define WDTCSR WDTCR
 #endif
-#ifdef WDCE
         WDTCSR |= (1<<WDCE) | (1<<WDE); // timed sequence
-#else
-        WDTCSR |= (1<<WDE); // timed sequence
-#endif
         WDTCSR = wdtcsr;
     }
 }

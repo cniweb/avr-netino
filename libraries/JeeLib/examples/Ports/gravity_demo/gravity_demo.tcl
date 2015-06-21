@@ -41,4 +41,4 @@ proc process {device data} {
   variable the [format %.2f [expr {$rad * atan2(sqrt($x*$x + $y*$y),$z)}]]
 }
 
-Jm rev {$Id$}
+Jm rev {$Id: gravity_demo.tcl 7640 2011-04-27 23:13:49Z jcw $}
