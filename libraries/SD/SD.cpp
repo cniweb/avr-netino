@@ -332,7 +332,7 @@ boolean callback_rmdir(SdFile& parentDir, char *filePathComponent,
 
 
 
-boolean SDClass::begin(uint8_t csPin) {
+boolean SDClass::begin(uint8_t csPin, int8_t mosi, int8_t miso, int8_t sck) {
   /*
 
     Performs the initialisation required by the sdfatlib library.
@@ -340,11 +340,16 @@ boolean SDClass::begin(uint8_t csPin) {
     Return true if initialization succeeds, false otherwise.
 
    */
-  return card.init(SPI_HALF_SPEED, csPin) &&
+  return card.init(SPI_HALF_SPEED, csPin, mosi, miso, sck) &&
          volume.init(card) &&
          root.openRoot(volume);
 }
 
+//call this when a card is removed. It will allow you to inster and initialise a new card.
+void SDClass::end()
+{
+  root.close();
+}
 
 
 // this little helper is used to traverse paths
@@ -560,6 +565,10 @@ boolean SDClass::rmdir(char *filepath) {
 
 boolean SDClass::remove(char *filepath) {
   return walkPath(filepath, root, callback_remove);
+}
+
+void SDClass::enableCRC(boolean mode) {
+  card.enableCRC(mode);
 }
 
 

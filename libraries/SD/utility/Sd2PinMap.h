@@ -47,29 +47,7 @@ struct pin_map_t {
   uint8_t bit;
 };
 //------------------------------------------------------------------------------
-// check for AVR-Netino core:
-#include <Arduino.h>
-#if defined( BOARD_DEF )
-// we have board.def file, so use it
-#warning use board definition from BOARD_DEF
-
-// Two Wire (aka I2C) ports
-uint8_t const SDA_PIN = pins_SDA;
-uint8_t const SCL_PIN = pins_SCL;
-
-// SPI port
-uint8_t const SS_PIN = pins_SS;
-uint8_t const MOSI_PIN = pins_MOSI;
-uint8_t const MISO_PIN = pins_MISO;
-uint8_t const SCK_PIN = pins_SCK;
-
-static const pin_map_t digitalPinMap[] = {
-#define pinDef(p,b,t,...)	{&DDR##p, &PIN##p, &PORT##p, b},
-#include BOARD_DEF
-#undef pinDef
-};
-//------------------------------------------------------------------------------
-#elif defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
+#if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
 // Mega
 
 // Two Wire (aka I2C) ports
