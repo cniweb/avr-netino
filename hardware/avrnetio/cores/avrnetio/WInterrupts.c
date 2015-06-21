@@ -22,7 +22,6 @@
   
   Modified 24 November 2006 by David A. Mellis
   Modified 1 August 2010 by Mark Sproul
-  Add Int 3 2011-01-08 by M.Maassen <mic.maassen@gmail.com>
 */
 
 #include <inttypes.h>
@@ -46,8 +45,7 @@ void attachInterrupt(uint8_t interruptNum, void (*userFunc)(void), int mode) {
     // the mode into place.
       
     // Enable the interrupt.
-
-    mode &= 3;                  /* only the bits 0,1 */
+      
     switch (interruptNum) {
 #if defined(__AVR_ATmega32U4__)
 	// I hate doing this, but the register assignment differs between the 1280/2560
@@ -129,7 +127,7 @@ void attachInterrupt(uint8_t interruptNum, void (*userFunc)(void), int mode) {
     #elif defined(MCUCR) && defined(ISC10) && defined(ISC11) && defined(GICR)
       MCUCR = (MCUCR & ~((1 << ISC10) | (1 << ISC11))) | (mode << ISC10);
       GICR |= (1 << INT1);
-    #elif defined(MCUCR) && defined(ISC10) && defined(ISC11) && defined(GIMSK)
+    #elif defined(MCUCR) && defined(ISC10) && defined(GIMSK) && defined(GIMSK)
       MCUCR = (MCUCR & ~((1 << ISC10) | (1 << ISC11))) | (mode << ISC10);
       GIMSK |= (1 << INT1);
     #else
@@ -147,10 +145,7 @@ void attachInterrupt(uint8_t interruptNum, void (*userFunc)(void), int mode) {
     #elif defined(MCUCR) && defined(ISC20) && defined(GIMSK) && defined(GIMSK)
       MCUCR = (MCUCR & ~((1 << ISC20) | (1 << ISC21))) | (mode << ISC20);
       GIMSK |= (1 << INT2);
-    #elif defined(MCUCSR) && defined(ISC2) && defined(GICR)
-      MCUCSR = (MCUCSR & ~(1 << ISC2) ) | ((mode&1) << ISC2);
-      GICR |= (1 << INT2);
-    #endif  /* only 2 ext. interrups */
+    #endif
       break;
 #endif
     }
@@ -228,7 +223,7 @@ void detachInterrupt(uint8_t interruptNum) {
       #warning detachInterrupt may need some more work for this cpu (case 1)
     #endif
       break;
-
+      
     case 2:
     #if defined(EIMSK) && defined(INT2)
       EIMSK &= ~(1 << INT2);
@@ -236,10 +231,10 @@ void detachInterrupt(uint8_t interruptNum) {
       GICR &= ~(1 << INT2); // atmega32
     #elif defined(GIMSK) && defined(INT2)
       GIMSK &= ~(1 << INT2);
-    #else
-      // only 2 ext. ints
+    #elif defined(INT2)
+      #warning detachInterrupt may need some more work for this cpu (case 2)
     #endif
-      break;
+      break;       
 #endif
     }
       
@@ -333,8 +328,7 @@ ISR(INT1_vect) {
     intFunc[EXTERNAL_INT_1]();
 }
 
-#if EXTERNAL_NUM_INTERRUPTS > 2
-//#if defined(EICRA) && defined(ISC20)
+#if defined(EICRA) && defined(ISC20)
 ISR(INT2_vect) {
   if(intFunc[EXTERNAL_INT_2])
     intFunc[EXTERNAL_INT_2]();

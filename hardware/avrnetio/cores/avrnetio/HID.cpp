@@ -16,9 +16,7 @@
 ** SOFTWARE.  
 */
 
-#include "Platform.h"
 #include "USBAPI.h"
-#include "USBDesc.h"
 
 #if defined(USBCON)
 #ifdef HID_ENABLED
@@ -151,7 +149,7 @@ int WEAK HID_GetInterface(u8* interfaceNum)
 	return USB_SendControl(TRANSFER_PGM,&_hidInterface,sizeof(_hidInterface));
 }
 
-int WEAK HID_GetDescriptor(int i)
+int WEAK HID_GetDescriptor(int /* i */)
 {
 	return USB_SendControl(TRANSFER_PGM,_hidReportDescriptor,sizeof(_hidReportDescriptor));
 }
@@ -510,9 +508,9 @@ void Keyboard_::releaseAll(void)
 
 size_t Keyboard_::write(uint8_t c)
 {	
-	uint8_t p = press(c);		// Keydown
-	uint8_t r = release(c);		// Keyup
-	return (p);					// just return the result of press() since release() almost always returns 1
+	uint8_t p = press(c);  // Keydown
+	release(c);            // Keyup
+	return p;              // just return the result of press() since release() almost always returns 1
 }
 
 #endif

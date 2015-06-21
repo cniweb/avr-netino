@@ -30,6 +30,8 @@ Version Modified By Date     Comments
 0006    D Mellis    09/12/29 Replaced objects with functions
 0007    M Sproul    10/08/29 Changed #ifdefs from cpu to register
 0008    S Kanemoto  12/06/22 Fixed for Leonardo by @maris_HY
+0009    J Reucker   15/04/10 Issue #292 Fixed problems with ATmega8 (thanks to Pete62)
+0010    jipp        15/04/13 added additional define check #2923
 *************************************************/
 
 #include <avr/interrupt.h>
@@ -37,42 +39,17 @@ Version Modified By Date     Comments
 #include "Arduino.h"
 #include "pins_arduino.h"
 
-#if !defined(TCCR2A) && defined(TCCR2)
-#define	TCCR2A	TCCR2
+#if defined(__AVR_ATmega8__) || defined(__AVR_ATmega128__)
+#define TCCR2A TCCR2
+#define TCCR2B TCCR2
+#define COM2A1 COM21
+#define COM2A0 COM20
+#define OCR2A OCR2
+#define TIMSK2 TIMSK
+#define OCIE2A OCIE2
+#define TIMER2_COMPA_vect TIMER2_COMP_vect
+#define TIMSK1 TIMSK
 #endif
-
-#if !defined(TCCR2B) && defined(TCCR2)
-#define	TCCR2B	TCCR2
-#endif
-
-#if !defined(COM2A1) && defined(COM21)
-#define	COM2A1	COM21
-#endif
-
-#if !defined(COM2A0) && defined(COM20)
-#define	COM2A0	COM20
-#endif
-
-#if !defined(OCR2A) && defined(OCR2)
-#define	OCR2A	OCR2
-#endif
-
-#if !defined(TIMSK2) && defined(TIMSK)
-#define	TIMSK2	TIMSK
-#endif
-
-#if !defined(OCIE2A) && defined(OCIE2)
-#define	OCIE2A	OCIE2
-#endif
-
-#if !defined(TIMER2_COMPA_vect) && defined(TIMER2_COMP_vect)
-#define	TIMER2_COMPA_vect TIMER2_COMP_vect	
-#endif
-
-#if !defined(TIMSK1) && defined(TIMSK)
-#define	TIMSK1	TIMSK
-#endif
-
 
 // timerx_toggle_count:
 //  > 0 - duration specified
@@ -176,7 +153,7 @@ static int8_t toneBegin(uint8_t _pin)
     // whereas 16 bit timers are set to either ck/1 or ck/64 prescalar
     switch (_timer)
     {
-      #if defined(TCCR0A) && defined(TCCR0B)
+      #if defined(TCCR0A) && defined(TCCR0B) && defined(WGM01)
       case 0:
         // 8 bit timer
         TCCR0A = 0;
@@ -321,13 +298,13 @@ void tone(uint8_t _pin, unsigned int frequency, unsigned long duration)
 #if defined(TCCR0B)
       if (_timer == 0)
       {
-        TCCR0B = prescalarbits;
+        TCCR0B = (TCCR0B & 0b11111000) | prescalarbits;
       }
       else
 #endif
 #if defined(TCCR2B)
       {
-        TCCR2B = prescalarbits;
+        TCCR2B = (TCCR2B & 0b11111000) | prescalarbits;
       }
 #else
       {
@@ -414,7 +391,7 @@ void tone(uint8_t _pin, unsigned int frequency, unsigned long duration)
         break;
 #endif
 
-#if defined(TIMSK3)
+#if defined(OCR3A) && defined(TIMSK3) && defined(OCIE3A)
       case 3:
         OCR3A = ocr;
         timer3_toggle_count = toggle_count;
@@ -422,7 +399,7 @@ void tone(uint8_t _pin, unsigned int frequency, unsigned long duration)
         break;
 #endif
 
-#if defined(TIMSK4)
+#if defined(OCR4A) && defined(TIMSK4) && defined(OCIE4A)
       case 4:
         OCR4A = ocr;
         timer4_toggle_count = toggle_count;
@@ -479,21 +456,21 @@ void disableTimer(uint8_t _timer)
       #endif
       break;
 
-#if defined(TIMSK3)
+#if defined(TIMSK3) && defined(OCIE3A)
     case 3:
-      TIMSK3 = 0;
+      bitWrite(TIMSK3, OCIE3A, 0);
       break;
 #endif
 
-#if defined(TIMSK4)
+#if defined(TIMSK4) && defined(OCIE4A)
     case 4:
-      TIMSK4 = 0;
+      bitWrite(TIMSK4, OCIE4A, 0);
       break;
 #endif
 
-#if defined(TIMSK5)
+#if defined(TIMSK5) && defined(OCIE5A)
     case 5:
-      TIMSK5 = 0;
+      bitWrite(TIMSK5, OCIE5A, 0);
       break;
 #endif
   }

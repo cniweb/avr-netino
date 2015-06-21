@@ -24,31 +24,9 @@
 
 #include "wiring_private.h"
 
-#ifndef TIMER0_CLK_SRC
-#if F_CPU < 250000L
-#define TIMER0_CLK_SRC 1	/* CS0 :1 */
-#elif F_CPU < 2000000L
-#define TIMER0_CLK_SRC 2	/* CS0 | CS1 :8*/
-#else
-#define TIMER0_CLK_SRC 3	/* CS0 | CS1 :64*/
-#endif
-#endif
-
-#if TIMER0_CLK_SRC == 1
-#define MICROSECONDS_PER_TIMER0_OVERFLOW (clockCyclesToMicroseconds(1 * 256))
-#elif TIMER0_CLK_SRC == 2
-#define MICROSECONDS_PER_TIMER0_OVERFLOW (clockCyclesToMicroseconds(8 * 256))
-#elif TIMER0_CLK_SRC == 3
 // the prescaler is set so that timer0 ticks every 64 clock cycles, and the
 // the overflow handler is called every 256 ticks.
 #define MICROSECONDS_PER_TIMER0_OVERFLOW (clockCyclesToMicroseconds(64 * 256))
-#elif TIMER0_CLK_SRC == 4
-#define MICROSECONDS_PER_TIMER0_OVERFLOW (clockCyclesToMicroseconds(256 * 256))
-#elif TIMER0_CLK_SRC == 5
-#define MICROSECONDS_PER_TIMER0_OVERFLOW (clockCyclesToMicroseconds(1024 * 256))
-#else 
-#error "TIMER0_CLK_SRC has illigal value"
-#endif
 
 // the whole number of milliseconds per timer0 overflow
 #define MILLIS_INC (MICROSECONDS_PER_TIMER0_OVERFLOW / 1000)
@@ -56,16 +34,14 @@
 // the fractional number of milliseconds per timer0 overflow. we shift right
 // by three to fit these numbers into a byte. (for the clock speeds we care
 // about - 8 and 16 MHz - this doesn't lose precision.)
-// Mic: shift by only 2, for better precision, also changed isr
-#define FRACT_INC ((MICROSECONDS_PER_TIMER0_OVERFLOW % 1000) >> 2)
-#define FRACT_MAX ((1000 >> 2) - FRACT_INC)
+#define FRACT_INC ((MICROSECONDS_PER_TIMER0_OVERFLOW % 1000) >> 3)
+#define FRACT_MAX (1000 >> 3)
 
 volatile unsigned long timer0_overflow_count = 0;
 volatile unsigned long timer0_millis = 0;
 static unsigned char timer0_fract = 0;
 
-//#if defined(__AVR_ATtiny24__) || defined(__AVR_ATtiny44__) || defined(__AVR_ATtiny84__)
-#ifndef TIMER0_OVF_vect
+#if defined(__AVR_ATtiny24__) || defined(__AVR_ATtiny44__) || defined(__AVR_ATtiny84__)
 ISR(TIM0_OVF_vect)
 #else
 ISR(TIMER0_OVF_vect)
@@ -77,11 +53,10 @@ ISR(TIMER0_OVF_vect)
 	unsigned char f = timer0_fract;
 
 	m += MILLIS_INC;
+	f += FRACT_INC;
 	if (f >= FRACT_MAX) {
 		f -= FRACT_MAX;
 		m += 1;
-	} else {
-	  f += FRACT_INC;
 	}
 
 	timer0_fract = f;
@@ -89,10 +64,6 @@ ISR(TIMER0_OVF_vect)
 	timer0_overflow_count++;
 }
 
-// the timing fuctions are decleared weak to allow the user 
-// to use a own clock scheme
-
-unsigned long millis(void) __attribute__((weak));
 unsigned long millis()
 {
 	unsigned long m;
@@ -107,7 +78,6 @@ unsigned long millis()
 	return m;
 }
 
-unsigned long micros(void) __attribute__((weak));
 unsigned long micros() {
 	unsigned long m;
 	uint8_t oldSREG = SREG, t;
@@ -122,7 +92,6 @@ unsigned long micros() {
 	#error TIMER 0 not defined
 #endif
 
-  
 #ifdef TIFR0
 	if ((TIFR0 & _BV(TOV0)) && (t < 255))
 		m++;
@@ -133,22 +102,9 @@ unsigned long micros() {
 
 	SREG = oldSREG;
 	
-#if TIMER0_CLK_SRC == 1
-	return ((m << 8) + t) * (1 / clockCyclesPerMicrosecond());
-#elif TIMER0_CLK_SRC == 2
-	return ((m << 8) + t) * (8 / clockCyclesPerMicrosecond());
-#elif TIMER0_CLK_SRC == 3
 	return ((m << 8) + t) * (64 / clockCyclesPerMicrosecond());
-#elif TIMER0_CLK_SRC == 4
-	return ((m << 8) + t) * (256 / clockCyclesPerMicrosecond());
-#elif TIMER0_CLK_SRC == 5
-	return ((m << 8) + t) * (1024 / clockCyclesPerMicrosecond());
-#else 
-#error "TIMER0_CLK_SRC has illigal value"
-#endif
 }
 
-void delay(unsigned long) __attribute__((weak));
 void delay(unsigned long ms)
 {
 	uint16_t start = (uint16_t)micros();
@@ -162,81 +118,118 @@ void delay(unsigned long ms)
 	}
 }
 
-/* Delay for the given number of microseconds.  Assumes a 8 or 16 MHz clock. */
-void delayMicroseconds(unsigned int us) __attribute__((weak));
+/* Delay for the given number of microseconds.  Assumes a 1, 8, 12, 16, 20 or 24 MHz clock. */
 void delayMicroseconds(unsigned int us)
 {
+	// call = 4 cycles + 2 to 4 cycles to init us(2 for constant delay, 4 for variable)
+
 	// calling avrlib's delay_us() function with low values (e.g. 1 or
 	// 2 microseconds) gives delays longer than desired.
 	//delay_us(us);
-#if F_CPU >= 20000000L
+#if F_CPU >= 24000000L
+	// for the 24 MHz clock for the aventurous ones, trying to overclock
+
+	// zero delay fix
+	if (!us) return; //  = 3 cycles, (4 when true)
+
+	// the following loop takes a 1/6 of a microsecond (4 cycles)
+	// per iteration, so execute it six times for each microsecond of
+	// delay requested.
+	us *= 6; // x6 us, = 7 cycles
+
+	// account for the time taken in the preceeding commands.
+	// we just burned 22 (24) cycles above, remove 5, (5*4=20)
+	// us is at least 6 so we can substract 5
+	us -= 5; //=2 cycles
+
+#elif F_CPU >= 20000000L
 	// for the 20 MHz clock on rare Arduino boards
 
-	// for a one-microsecond delay, simply wait 2 cycle and return. The overhead
-	// of the function call yields a delay of exactly a one microsecond.
+	// for a one-microsecond delay, simply return.  the overhead
+	// of the function call takes 18 (20) cycles, which is 1us
 	__asm__ __volatile__ (
 		"nop" "\n\t"
-		"nop"); //just waiting 2 cycle
-	if (--us == 0)
-		return;
+		"nop" "\n\t"
+		"nop" "\n\t"
+		"nop"); //just waiting 4 cycles
+	if (us <= 1) return; //  = 3 cycles, (4 when true)
 
 	// the following loop takes a 1/5 of a microsecond (4 cycles)
 	// per iteration, so execute it five times for each microsecond of
 	// delay requested.
-	us = (us<<2) + us; // x5 us
+	us = (us << 2) + us; // x5 us, = 7 cycles
 
 	// account for the time taken in the preceeding commands.
-	us -= 2;
+	// we just burned 26 (28) cycles above, remove 7, (7*4=28)
+	// us is at least 10 so we can substract 7
+	us -= 7; // 2 cycles
 
 #elif F_CPU >= 16000000L
 	// for the 16 MHz clock on most Arduino boards
 
 	// for a one-microsecond delay, simply return.  the overhead
-	// of the function call yields a delay of approximately 1 1/8 us.
-	if (--us == 0)
-		return;
+	// of the function call takes 14 (16) cycles, which is 1us
+	if (us <= 1) return; //  = 3 cycles, (4 when true)
 
-	// the following loop takes a quarter of a microsecond (4 cycles)
+	// the following loop takes 1/4 of a microsecond (4 cycles)
 	// per iteration, so execute it four times for each microsecond of
 	// delay requested.
-	us <<= 2;
+	us <<= 2; // x4 us, = 4 cycles
 
 	// account for the time taken in the preceeding commands.
-	us -= 2;
+	// we just burned 19 (21) cycles above, remove 5, (5*4=20)
+	// us is at least 8 so we can substract 5
+	us -= 5; // = 2 cycles,
+
 #elif F_CPU >= 12000000L
-	// for the 12 MHz clock on spare boards
+	// for the 12 MHz clock if somebody is working with USB
 
-	// for a one-microsecond delay, simply return.  the overhead
-	// of the function call yields a delay 
-	if (--us == 0)
-		return;
+	// for a 1 microsecond delay, simply return.  the overhead
+	// of the function call takes 14 (16) cycles, which is 1.5us
+	if (us <= 1) return; //  = 3 cycles, (4 when true)
 
-	// the following loop takes a third of a microsecond (4 cycles)
+	// the following loop takes 1/3 of a microsecond (4 cycles)
 	// per iteration, so execute it three times for each microsecond of
 	// delay requested.
-	us = (us << 1) + us; // x3
+	us = (us << 1) + us; // x3 us, = 5 cycles
 
 	// account for the time taken in the preceeding commands.
-	us -= 2;
-#else
-	// for the 8 MHz internal clock on the ATmega168
+	// we just burned 20 (22) cycles above, remove 5, (5*4=20)
+	// us is at least 6 so we can substract 5
+	us -= 5; //2 cycles
 
-	// for a one- or two-microsecond delay, simply return.  the overhead of
-	// the function calls takes more than two microseconds.  can't just
-	// subtract two, since us is unsigned; we'd overflow.
-	if (--us == 0)
-		return;
-	if (--us == 0)
-		return;
+#elif F_CPU >= 8000000L
+	// for the 8 MHz internal clock
 
-	// the following loop takes half of a microsecond (4 cycles)
+	// for a 1 and 2 microsecond delay, simply return.  the overhead
+	// of the function call takes 14 (16) cycles, which is 2us
+	if (us <= 2) return; //  = 3 cycles, (4 when true)
+
+	// the following loop takes 1/2 of a microsecond (4 cycles)
 	// per iteration, so execute it twice for each microsecond of
 	// delay requested.
-	us <<= 1;
-    
-	// partially compensate for the time taken by the preceeding commands.
-	// we can't subtract any more than this or we'd overflow w/ small delays.
-	us--;
+	us <<= 1; //x2 us, = 2 cycles
+
+	// account for the time taken in the preceeding commands.
+	// we just burned 17 (19) cycles above, remove 4, (4*4=16)
+	// us is at least 6 so we can substract 4
+	us -= 4; // = 2 cycles
+
+#else
+	// for the 1 MHz internal clock (default settings for common Atmega microcontrollers)
+
+	// the overhead of the function calls is 14 (16) cycles
+	if (us <= 16) return; //= 3 cycles, (4 when true)
+	if (us <= 25) return; //= 3 cycles, (4 when true), (must be at least 25 if we want to substract 22)
+
+	// compensate for the time taken by the preceeding and next commands (about 22 cycles)
+	us -= 22; // = 2 cycles
+	// the following loop takes 4 microseconds (4 cycles)
+	// per iteration, so execute it us/4 times
+	// us is at least 4, divided by 4 gives us 1 (no zero delay bug)
+	us >>= 2; // us div 4, = 4 cycles
+	
+
 #endif
 
 	// busy wait
@@ -244,6 +237,7 @@ void delayMicroseconds(unsigned int us)
 		"1: sbiw %0,1" "\n\t" // 2 cycles
 		"brne 1b" : "=w" (us) : "0" (us) // 2 cycles
 	);
+	// return = 4 cycles
 }
 
 void init()
@@ -258,33 +252,26 @@ void init()
 #if defined(TCCR0A) && defined(WGM01)
 	sbi(TCCR0A, WGM01);
 	sbi(TCCR0A, WGM00);
-#elif defined(TCCR0) && defined(WGM01)
-	// ATmega32 uses Timer0 is fast PWM for output
-	sbi(TCCR0, WGM01);
-	sbi(TCCR0, WGM00);
-#endif  
+#endif
 
 	// set timer 0 prescale factor to 64
-#if defined(TCCR0B) 
-	// this combination is for the standard 168/328/1280/2560
-#define TCCR0_CLK_SRC TCCR0B
-#elif defined(TCCR0A)
-	// this combination is for the __AVR_ATmega645__ series
-#define TCCR0_CLK_SRC TCCR0A
-#elif defined(TCCR0)
+#if defined(__AVR_ATmega128__)
+	// CPU specific: different values for the ATmega128
+	sbi(TCCR0, CS02);
+#elif defined(TCCR0) && defined(CS01) && defined(CS00)
 	// this combination is for the standard atmega8
-#define TCCR0_CLK_SRC TCCR0
+	sbi(TCCR0, CS01);
+	sbi(TCCR0, CS00);
+#elif defined(TCCR0B) && defined(CS01) && defined(CS00)
+	// this combination is for the standard 168/328/1280/2560
+	sbi(TCCR0B, CS01);
+	sbi(TCCR0B, CS00);
+#elif defined(TCCR0A) && defined(CS01) && defined(CS00)
+	// this combination is for the __AVR_ATmega645__ series
+	sbi(TCCR0A, CS01);
+	sbi(TCCR0A, CS00);
 #else
 	#error Timer 0 prescale factor 64 not set correctly
-#endif
-#if (TIMER0_CLK_SRC & 4) && defined(CS02)
-	sbi(TCCR0_CLK_SRC, CS02);
-#endif
-#if (TIMER0_CLK_SRC & 2) && defined(CS01)
-	sbi(TCCR0_CLK_SRC, CS01);
-#endif
-#if (TIMER0_CLK_SRC & 1) && defined(CS00)
-	sbi(TCCR0_CLK_SRC, CS00);
 #endif
 
 	// enable timer 0 overflow interrupt
@@ -300,10 +287,10 @@ void init()
 	// this is better for motors as it ensures an even waveform
 	// note, however, that fast pwm mode can achieve a frequency of up
 	// 8 MHz (with a 16 MHz clock) at 50% duty cycle
-#if defined(TCCR1B)
+
 #if defined(TCCR1B) && defined(CS11) && defined(CS10)
 	TCCR1B = 0;
-#endif
+
 	// set timer 1 prescale factor to 64
 	sbi(TCCR1B, CS11);
 #if F_CPU >= 8000000L
@@ -368,14 +355,32 @@ void init()
 #endif
 
 #if defined(ADCSRA)
-	// set a2d prescale factor to 128
-	// 16 MHz / 128 = 125 KHz, inside the desired 50-200 KHz range.
-	// XXX: this will not work properly for other clock speeds, and
-	// this code should use F_CPU to determine the prescale factor.
-	sbi(ADCSRA, ADPS2);
-	sbi(ADCSRA, ADPS1);
-	sbi(ADCSRA, ADPS0);
-
+	// set a2d prescaler so we are inside the desired 50-200 KHz range.
+	#if F_CPU >= 16000000 // 16 MHz / 128 = 125 KHz
+		sbi(ADCSRA, ADPS2);
+		sbi(ADCSRA, ADPS1);
+		sbi(ADCSRA, ADPS0);
+	#elif F_CPU >= 8000000 // 8 MHz / 64 = 125 KHz
+		sbi(ADCSRA, ADPS2);
+		sbi(ADCSRA, ADPS1);
+		cbi(ADCSRA, ADPS0);
+	#elif F_CPU >= 4000000 // 4 MHz / 32 = 125 KHz
+		sbi(ADCSRA, ADPS2);
+		cbi(ADCSRA, ADPS1);
+		sbi(ADCSRA, ADPS0);
+	#elif F_CPU >= 2000000 // 2 MHz / 16 = 125 KHz
+		sbi(ADCSRA, ADPS2);
+		cbi(ADCSRA, ADPS1);
+		cbi(ADCSRA, ADPS0);
+	#elif F_CPU >= 1000000 // 1 MHz / 8 = 125 KHz
+		cbi(ADCSRA, ADPS2);
+		sbi(ADCSRA, ADPS1);
+		sbi(ADCSRA, ADPS0);
+	#else // 128 kHz / 2 = 64 KHz -> This is the closest you can get, the prescaler is 2
+		cbi(ADCSRA, ADPS2);
+		cbi(ADCSRA, ADPS1);
+		sbi(ADCSRA, ADPS0);
+	#endif
 	// enable a2d conversions
 	sbi(ADCSRA, ADEN);
 #endif
@@ -389,18 +394,3 @@ void init()
 	UCSR0B = 0;
 #endif
 }
-
-/**
- * Empty yield() hook.
- *
- * This function is intended to be used by library writers to build
- * libraries or sketches that supports cooperative threads.
- *
- * Its defined as a weak symbol and it can be redefined to implement a
- * real cooperative scheduler.
- */
-static void __empty() {
-	// Empty
-}
-void yield(void) __attribute__ ((weak, alias("__empty")));
-
