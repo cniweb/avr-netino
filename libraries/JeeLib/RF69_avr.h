@@ -1,17 +1,53 @@
 #include <avr/interrupt.h>
 #include <util/crc16.h>
+#include <Arduino.h>
 
 // prog_uint8_t appears to be deprecated in avr libc, this resolves it for now
 #define __PROG_TYPES_COMPAT__
 #include <avr/pgmspace.h>
 
-#define ROM_UINT8       const prog_uint8_t
+//#define ROM_UINT8       const prog_uint8_t
 #define ROM_READ_UINT8  pgm_read_byte
 #define ROM_DATA        PROGMEM
+#define ROM_UINT8       const uint8_t PROGMEM
 
 #define IRQ_ENABLE      sei()
 
-#if defined(__AVR_ATmega2560__) || defined(__AVR_ATmega1280__)
+#if defined(AVR_Netino)
+// we compile w/ avrnetio core
+#define SPI_SS      SS
+#define SPI_MOSI    MOSI
+#define SPI_MISO    MISO
+#define SPI_SCK     SCK
+#define SPI_PORT    (*portOutputRegister( digitalPinToPort( MOSI )))
+#define SPI_DDR     (*portModeRegister( digitalPinToPort( MOSI )))
+#ifdef BOARD_DEF
+// we have pins_ definitions
+#define RFM_IRQ     RFM12_INR
+#define SS_DDR      (*portModeRegister(   digitalPinToPort( pins_RFM12_CS )))
+#define SS_PORT     (*portOutputRegister( digitalPinToPort( pins_RFM12_CS )))
+#define SS_BMSK     digitalPinToBitMask( pins_RFM12_CS )
+#define SS_BIT      5 		// not used
+#else
+//#define RFM_IRQ     1
+#define SPI_PORT    PORTB
+#define SPI_DDR     DDRB
+#define SS_DDR      DDRD
+#define SS_PORT     PORTD
+#define SS_BIT      5
+#define SS_BMSK     _BV(SS_BIT)
+#endif	// BOARD_DEF
+
+static void spiConfigPins () {
+    SS_PORT  |= SS_BMSK;
+    SS_DDR   |= SS_BMSK;
+    SPI_PORT |= digitalPinToBitMask(SS);
+    SPI_DDR  |= digitalPinToBitMask(SS) 
+             | digitalPinToBitMask(SPI_MOSI) 
+             | digitalPinToBitMask(SPI_SCK);
+}
+
+#elif defined(__AVR_ATmega2560__) || defined(__AVR_ATmega1280__)
 
 #define RFM_IRQ     2
 #define SS_DDR      DDRB
@@ -57,9 +93,9 @@ static void spiConfigPins () {
 #define SS_BIT      1
 
 #define SPI_SS      1     // PB1, pin 3
-#define SPI_MISO    6     // PA6, pin 7
+#define SPI_MISO    4     // PA6, pin 7
 #define SPI_MOSI    5     // PA5, pin 8
-#define SPI_SCK     4     // PA4, pin 9
+#define SPI_SCK     6     // PA4, pin 9
 
 static void spiConfigPins () {
     SS_PORT |= _BV(SS_BIT);
@@ -70,17 +106,17 @@ static void spiConfigPins () {
     DDRA |= _BV(SPI_MOSI) | _BV(SPI_SCK);
 }
 
-#elif defined(__AVR_ATmega32U4__) //Arduino Leonardo
+#elif defined(__AVR_ATmega32U4__) //Arduino Leonardo 
 
-#define RFM_IRQ     0	    // PD0, INT0, Digital3
+#define RFM_IRQ     3	  // PD0, INT0, Digital3 
 #define SS_DDR      DDRB
 #define SS_PORT     PORTB
-#define SS_BIT      6	    // Dig10, PB6
+#define SS_BIT      6	  // Dig10, PB6
 
-#define SPI_SS      0     // PB0, pin 8, Digital17
-#define SPI_MISO    3     // PB3, pin 11, Digital14
-#define SPI_MOSI    2     // PB2, pin 10, Digital16
-#define SPI_SCK     1     // PB1, pin 9, Digital15
+#define SPI_SS      17    // PB0, pin 8, Digital17
+#define SPI_MISO    14    // PB3, pin 11, Digital14
+#define SPI_MOSI    16    // PB2, pin 10, Digital16
+#define SPI_SCK     15    // PB1, pin 9, Digital15
 
 static void spiConfigPins () {
     SS_PORT |= _BV(SS_BIT);
@@ -121,14 +157,14 @@ struct PreventInterrupt {
 
 static void spiInit (void) {
     spiConfigPins();
-
-#ifdef SPCR
+    
+#ifdef SPCR    
     SPCR = _BV(SPE) | _BV(MSTR);
     SPSR |= _BV(SPI2X);
 #else
     USICR = _BV(USIWM0); // ATtiny
-#endif
-
+#endif    
+    
     // pinMode(RFM_IRQ, INPUT);
     // digitalWrite(RFM_IRQ, 1); // pull-up
 }

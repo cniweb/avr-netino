@@ -18,15 +18,35 @@
   Public License along with this library; if not, write to the
   Free Software Foundation, Inc., 59 Temple Place, Suite 330,
   Boston, MA  02111-1307  USA
-
-  $Id$
 */
 
 #include "wiring_private.h"
 
+#ifndef TIMER0_CLK_SRC
+#if F_CPU < 250000L
+#define TIMER0_CLK_SRC 1	/* CS0 :1 */
+#elif F_CPU < 2000000L
+#define TIMER0_CLK_SRC 2	/* CS0 | CS1 :8*/
+#else
+#define TIMER0_CLK_SRC 3	/* CS0 | CS1 :64*/
+#endif
+#endif
+
+#if TIMER0_CLK_SRC == 1
+#define MICROSECONDS_PER_TIMER0_OVERFLOW (clockCyclesToMicroseconds(1 * 256))
+#elif TIMER0_CLK_SRC == 2
+#define MICROSECONDS_PER_TIMER0_OVERFLOW (clockCyclesToMicroseconds(8 * 256))
+#elif TIMER0_CLK_SRC == 3
 // the prescaler is set so that timer0 ticks every 64 clock cycles, and the
 // the overflow handler is called every 256 ticks.
 #define MICROSECONDS_PER_TIMER0_OVERFLOW (clockCyclesToMicroseconds(64 * 256))
+#elif TIMER0_CLK_SRC == 4
+#define MICROSECONDS_PER_TIMER0_OVERFLOW (clockCyclesToMicroseconds(256 * 256))
+#elif TIMER0_CLK_SRC == 5
+#define MICROSECONDS_PER_TIMER0_OVERFLOW (clockCyclesToMicroseconds(1024 * 256))
+#else 
+#error "TIMER0_CLK_SRC has illigal value"
+#endif
 
 // the whole number of milliseconds per timer0 overflow
 #define MILLIS_INC (MICROSECONDS_PER_TIMER0_OVERFLOW / 1000)
@@ -34,18 +54,23 @@
 // the fractional number of milliseconds per timer0 overflow. we shift right
 // by three to fit these numbers into a byte. (for the clock speeds we care
 // about - 8 and 16 MHz - this doesn't lose precision.)
-#define FRACT_INC ((MICROSECONDS_PER_TIMER0_OVERFLOW % 1000) >> 3)
-#define FRACT_MAX (1000 >> 3)
+// Mic: shift by only 2, for better precision, also changed isr
+#define FRACT_INC ((MICROSECONDS_PER_TIMER0_OVERFLOW % 1000) >> 2)
+#define FRACT_MAX ((1000 >> 2) - FRACT_INC)
 
 volatile unsigned long timer0_overflow_count = 0;
 volatile unsigned long timer0_millis = 0;
 static unsigned char timer0_fract = 0;
 
-#if defined(__AVR_ATtiny24__) || defined(__AVR_ATtiny44__) || defined(__AVR_ATtiny84__)
-ISR(TIM0_OVF_vect)
-#else
-ISR(TIMER0_OVF_vect)
-#endif
+// I want TIMER0_OVF ISR to be overloadable from files in variant folder
+// but ISRs cannot decleared weak, because weak ones allready exists in
+// the startup files crt*.o
+// I define a weak new ISR TIMER0_OVF_user, that can be overloaded,
+// it's called from the original ISR TIMER0_OVF_vect by ISR_ALIAS(),
+// which adds a rjump to TIMER0_OVF_user.
+// ISR_ALIASOF() will not work here, because it uses alias(), which only
+// works with symbols in the same translation unit
+ISR(TIMER0_OVF_user, __attribute__((weak)))
 {
 	// copy these to local variables so they can be stored in registers
 	// (volatile variables must be read from memory on every access)
@@ -53,10 +78,11 @@ ISR(TIMER0_OVF_vect)
 	unsigned char f = timer0_fract;
 
 	m += MILLIS_INC;
-	f += FRACT_INC;
 	if (f >= FRACT_MAX) {
 		f -= FRACT_MAX;
 		m += 1;
+	} else {
+	  f += FRACT_INC;
 	}
 
 	timer0_fract = f;
@@ -64,6 +90,17 @@ ISR(TIMER0_OVF_vect)
 	timer0_overflow_count++;
 }
 
+#ifndef TIMER0_OVF_vect
+ISR_ALIAS(TIM0_OVF_vect, TIMER0_OVF_user)
+#else
+//ISR(TIMER0_OVF_vect,ISR_ALIASOF(TIMER0_OVF_user)); // does not work
+ISR_ALIAS(TIMER0_OVF_vect, TIMER0_OVF_user) // deprecated
+#endif
+
+// the timing fuctions are decleared weak to allow the user 
+// to use a own clock scheme
+
+unsigned long millis(void) __attribute__((weak));
 unsigned long millis()
 {
 	unsigned long m;
@@ -78,6 +115,7 @@ unsigned long millis()
 	return m;
 }
 
+unsigned long micros(void) __attribute__((weak));
 unsigned long micros() {
 	unsigned long m;
 	uint8_t oldSREG = SREG, t;
@@ -102,9 +140,22 @@ unsigned long micros() {
 
 	SREG = oldSREG;
 	
+#if TIMER0_CLK_SRC == 1
+	return ((m << 8) + t) * (1 / clockCyclesPerMicrosecond());
+#elif TIMER0_CLK_SRC == 2
+	return ((m << 8) + t) * (8 / clockCyclesPerMicrosecond());
+#elif TIMER0_CLK_SRC == 3
 	return ((m << 8) + t) * (64 / clockCyclesPerMicrosecond());
+#elif TIMER0_CLK_SRC == 4
+	return ((m << 8) + t) * (256 / clockCyclesPerMicrosecond());
+#elif TIMER0_CLK_SRC == 5
+	return ((m << 8) + t) * (1024 / clockCyclesPerMicrosecond());
+#else 
+#error "TIMER0_CLK_SRC has illigal value"
+#endif
 }
 
+void delay(unsigned long) __attribute__((weak));
 void delay(unsigned long ms)
 {
 	uint16_t start = (uint16_t)micros();
@@ -119,6 +170,7 @@ void delay(unsigned long ms)
 }
 
 /* Delay for the given number of microseconds.  Assumes a 1, 8, 12, 16, 20 or 24 MHz clock. */
+void delayMicroseconds(unsigned int us) __attribute__((weak));
 void delayMicroseconds(unsigned int us)
 {
 	// call = 4 cycles + 2 to 4 cycles to init us(2 for constant delay, 4 for variable)
@@ -252,26 +304,33 @@ void init()
 #if defined(TCCR0A) && defined(WGM01)
 	sbi(TCCR0A, WGM01);
 	sbi(TCCR0A, WGM00);
-#endif
+#elif defined(TCCR0) && defined(WGM01)
+	// ATmega32 uses Timer0 is fast PWM for output
+	sbi(TCCR0, WGM01);
+	sbi(TCCR0, WGM00);
+#endif  
 
 	// set timer 0 prescale factor to 64
-#if defined(__AVR_ATmega128__)
-	// CPU specific: different values for the ATmega128
-	sbi(TCCR0, CS02);
-#elif defined(TCCR0) && defined(CS01) && defined(CS00)
-	// this combination is for the standard atmega8
-	sbi(TCCR0, CS01);
-	sbi(TCCR0, CS00);
-#elif defined(TCCR0B) && defined(CS01) && defined(CS00)
+#if defined(TCCR0B) 
 	// this combination is for the standard 168/328/1280/2560
-	sbi(TCCR0B, CS01);
-	sbi(TCCR0B, CS00);
-#elif defined(TCCR0A) && defined(CS01) && defined(CS00)
+#define TCCR0_CLK_SRC TCCR0B
+#elif defined(TCCR0A)
 	// this combination is for the __AVR_ATmega645__ series
-	sbi(TCCR0A, CS01);
-	sbi(TCCR0A, CS00);
+#define TCCR0_CLK_SRC TCCR0A
+#elif defined(TCCR0)
+	// this combination is for the standard atmega8
+#define TCCR0_CLK_SRC TCCR0
 #else
 	#error Timer 0 prescale factor 64 not set correctly
+#endif
+#if (TIMER0_CLK_SRC & 4) && defined(CS02)
+	sbi(TCCR0_CLK_SRC, CS02);
+#endif
+#if (TIMER0_CLK_SRC & 2) && defined(CS01)
+	sbi(TCCR0_CLK_SRC, CS01);
+#endif
+#if (TIMER0_CLK_SRC & 1) && defined(CS00)
+	sbi(TCCR0_CLK_SRC, CS00);
 #endif
 
 	// enable timer 0 overflow interrupt
@@ -287,10 +346,10 @@ void init()
 	// this is better for motors as it ensures an even waveform
 	// note, however, that fast pwm mode can achieve a frequency of up
 	// 8 MHz (with a 16 MHz clock) at 50% duty cycle
-
+#if defined(TCCR1B)
 #if defined(TCCR1B) && defined(CS11) && defined(CS10)
 	TCCR1B = 0;
-
+#endif
 	// set timer 1 prescale factor to 64
 	sbi(TCCR1B, CS11);
 #if F_CPU >= 8000000L
@@ -305,8 +364,6 @@ void init()
 	// put timer 1 in 8-bit phase correct pwm mode
 #if defined(TCCR1A) && defined(WGM10)
 	sbi(TCCR1A, WGM10);
-#elif defined(TCCR1)
-	#warning this needs to be finished
 #endif
 
 	// set timer 2 prescale factor to 64
@@ -314,8 +371,8 @@ void init()
 	sbi(TCCR2, CS22);
 #elif defined(TCCR2B) && defined(CS22)
 	sbi(TCCR2B, CS22);
-#else
-	#warning Timer 2 not finished (may not be present on this CPU)
+//#else
+	// Timer 2 not finished (may not be present on this CPU)
 #endif
 
 	// configure timer 2 for phase correct pwm (8-bit)
@@ -323,8 +380,8 @@ void init()
 	sbi(TCCR2, WGM20);
 #elif defined(TCCR2A) && defined(WGM20)
 	sbi(TCCR2A, WGM20);
-#else
-	#warning Timer 2 not finished (may not be present on this CPU)
+//#else
+	// Timer 2 not finished (may not be present on this CPU)
 #endif
 
 #if defined(TCCR3B) && defined(CS31) && defined(WGM30)

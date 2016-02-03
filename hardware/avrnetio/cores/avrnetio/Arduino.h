@@ -57,23 +57,51 @@ void yield(void);
 #define LSBFIRST 0
 #define MSBFIRST 1
 
+  /* external interrupts */
 #define CHANGE 1
 #define FALLING 2
 #define RISING 3
 
-#if defined(__AVR_ATtiny24__) || defined(__AVR_ATtiny44__) || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny25__) || defined(__AVR_ATtiny45__) || defined(__AVR_ATtiny85__)
-#define DEFAULT 0
-#define EXTERNAL 1
-#define INTERNAL 2
-#else  
+  /* analog reference */
+#if defined(__AVR_ATtiny24__) || defined(__AVR_ATtiny44__) || defined(__AVR_ATtiny84__) 
+#define DEFAULT		0
+#define EXTERNAL	(1 << 6)
+#define INTERNAL	(2 << 6)	/* 1.1 V */
+#define ADCH_TEMP	0x22		/* must be ored with INTERNAL */
+#define ADCH_BG		0x21
+
+#elif defined(__AVR_ATtiny25__) || defined(__AVR_ATtiny45__) || defined(__AVR_ATtiny85__)
+#define DEFAULT		0
+#define EXTERNAL	(1 << 6)
+#define INTERNAL1V1	(2 << 6)	/* 1.1 V */
+#define INTERNAL	INTERNAL1V1
+#define INTERNAL2V56	0x90
+#define ADCH_TEMP      	0x0f		/* must be ored with INTERNAL */
+#define ADCH_BG		0x0c
+
+#elif defined(__AVR_ATtiny13__)
+#define DEFAULT		0		/* Vcc */
+#define INTERNAL	(1 << 6)	/* 1.1 V */
+
+#else  /* ATmegas */
 #if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__) || defined(__AVR_ATmega1284__) || defined(__AVR_ATmega1284P__) || defined(__AVR_ATmega644__) || defined(__AVR_ATmega644A__) || defined(__AVR_ATmega644P__) || defined(__AVR_ATmega644PA__)
-#define INTERNAL1V1 2
-#define INTERNAL2V56 3
+#define INTERNAL1V1	(2 << 6)
+#define INTERNAL	INTERNAL1V1
+#define INTERNAL2V56	(3 << 6)
+#define ADCH_BG		0x1e
+#else  /* ATmegaX8 */
+#define INTERNAL	(3 << 6)
+#if defined(__AVR_ATmega32U4__) 
+#define ADCH_TEMP	0x07		/* must be ored with INTERNAL */
+#define ADCH_BG		0x1e
 #else
-#define INTERNAL 3
-#endif
-#define DEFAULT 1
-#define EXTERNAL 0
+#define ADCH_TEMP	0x08		/* must be ored with INTERNAL */
+#define ADCH_BG		0x0e
+#endif	/* ATmega32U4 */
+#endif	/* ATmega1280 */
+#define DEFAULT		(1 << 6)
+#define EXTERNAL	0
+
 #endif
 
 // undefine stdlib's abs if encountered
@@ -180,6 +208,12 @@ extern const uint8_t PROGMEM digital_pin_to_timer_PGM[];
 #define NOT_AN_INTERRUPT -1
 
 #ifdef ARDUINO_MAIN
+
+#ifdef PE
+// PE in UCSRA
+#undef PE
+#endif
+
 #define PA 1
 #define PB 2
 #define PC 3

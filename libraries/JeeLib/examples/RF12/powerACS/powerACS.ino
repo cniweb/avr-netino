@@ -1,7 +1,7 @@
 /// @dir powerACS
 /// Measure power from an ACS714.
 // 2011-09-13 <jc@wippler.nl> http://opensource.org/licenses/mit-license.php
-// $Id: $
+// $Id$
 
 // ACS714 output pin is tied to AIO3. Power is 5V, so it swings around 2.5V.
 // Basic approach is to track a moving average, and to calculate the average

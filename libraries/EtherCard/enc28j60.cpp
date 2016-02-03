@@ -17,7 +17,6 @@
 
 uint16_t ENC28J60::bufferSize;
 bool ENC28J60::broadcast_enabled = false;
-bool ENC28J60::promiscuous_enabled = false;
 
 // ENC28J60 Control Registers
 // Control register definitions are a combination of address,
@@ -230,13 +229,29 @@ bool ENC28J60::promiscuous_enabled = false;
 #define ENC28J60_BIT_FIELD_CLR       0xA0
 #define ENC28J60_SOFT_RESET          0xFF
 
-// max frame length which the controller will accept:
+// The RXSTART_INIT must be zero. See Rev. B4 Silicon Errata point 5.
+// Buffer boundaries applied to internal 8K ram
+// the entire available packet buffer space is allocated
+
+#define RXSTART_INIT        0x0000  // start of RX buffer, room for 2 packets
+#define RXSTOP_INIT         0x0BFF  // end of RX buffer
+
+#define TXSTART_INIT        0x0C00  // start of TX buffer, room for 1 packet
+#define TXSTOP_INIT         0x11FF  // end of TX buffer
+
+#define SCRATCH_START       0x1200  // start of scratch area
+#define SCRATCH_LIMIT       0x2000  // past end of area, i.e. 3.5 Kb
+#define SCRATCH_PAGE_SHIFT  6       // addressing is in pages of 64 bytes
+#define SCRATCH_PAGE_SIZE   (1 << SCRATCH_PAGE_SHIFT)
+
+// max frame length which the conroller will accept:
 // (note: maximum ethernet frame length would be 1518)
 #define MAX_FRAMELEN      1500
 
 #define FULL_SPEED  1   // switch to full-speed SPI for bulk transfers
 
 static byte Enc28j60Bank;
+static int gNextPacketPtr;
 static byte selectPin;
 
 void ENC28J60::initSPI () {
@@ -289,42 +304,20 @@ static void writeOp (byte op, byte address, byte data) {
 }
 
 static void readBuf(uint16_t len, byte* data) {
-    uint8_t nextbyte;
-
     enableChip();
-    if (len != 0) {    
-        xferSPI(ENC28J60_READ_BUF_MEM);
-          
-        SPDR = 0x00; 
-        while (--len) {
-            while (!(SPSR & (1<<SPIF)))
-                ;
-            nextbyte = SPDR;
-            SPDR = 0x00;
-            *data++ = nextbyte;     
-        }
-        while (!(SPSR & (1<<SPIF)))
-            ;
-        *data++ = SPDR;    
+    xferSPI(ENC28J60_READ_BUF_MEM);
+    while (len--) {
+        xferSPI(0x00);
+        *data++ = SPDR;
     }
-    disableChip(); 
+    disableChip();
 }
 
 static void writeBuf(uint16_t len, const byte* data) {
     enableChip();
-    if (len != 0) {
-        xferSPI(ENC28J60_WRITE_BUF_MEM);
-           
-        SPDR = *data++;    
-        while (--len) {
-            uint8_t nextbyte = *data++;
-        	while (!(SPSR & (1<<SPIF)))
-                ;
-            SPDR = nextbyte;
-     	};  
-        while (!(SPSR & (1<<SPIF)))
-            ;
-    }
+    xferSPI(ENC28J60_WRITE_BUF_MEM);
+    while (len--)
+        xferSPI(*data++);
     disableChip();
 }
 
@@ -384,13 +377,13 @@ byte ENC28J60::initialize (uint16_t size, const byte* macaddr, byte csPin) {
     while (!readOp(ENC28J60_READ_CTRL_REG, ESTAT) & ESTAT_CLKRDY)
         ;
 
+    gNextPacketPtr = RXSTART_INIT;
     writeReg(ERXST, RXSTART_INIT);
     writeReg(ERXRDPT, RXSTART_INIT);
     writeReg(ERXND, RXSTOP_INIT);
     writeReg(ETXST, TXSTART_INIT);
     writeReg(ETXND, TXSTOP_INIT);
-
-    writeRegByte(ERXFCON, ERXFCON_UCEN|ERXFCON_CRCEN|ERXFCON_PMEN|ERXFCON_BCEN);
+    enableBroadcast(); // change to add ERXFCON_BCEN recommended by epam
     writeReg(EPMM0, 0x303f);
     writeReg(EPMCS, 0xf7f9);
     writeRegByte(MACON1, MACON1_MARXEN|MACON1_TXPAUS|MACON1_RXPAUS);
@@ -424,119 +417,22 @@ bool ENC28J60::isLinkUp() {
     return (readPhyByte(PHSTAT2) >> 2) & 1;
 }
 
-/*
-struct __attribute__((__packed__)) transmit_status_vector {
-    uint16_t transmitByteCount;
-    byte     transmitCollisionCount      :  4;
-    byte     transmitCrcError            :  1;
-    byte     transmitLengthCheckError    :  1;
-    byte     transmitLengthOutRangeError :  1;
-    byte     transmitDone                :  1;
-    byte     transmitMulticast           :  1;
-    byte     transmitBroadcast           :  1;
-    byte     transmitPacketDefer         :  1;
-    byte     transmitExcessiveDefer      :  1;
-    byte     transmitExcessiveCollision  :  1;
-    byte     transmitLateCollision       :  1;
-    byte     transmitGiant               :  1;
-    byte     transmitUnderrun            :  1;
-    uint16_t totalTransmitted; 
-    byte     transmitControlFrame        :  1;
-    byte     transmitPauseControlFrame   :  1;
-    byte     backpressureApplied         :  1;
-    byte     transmitVLAN                :  1;
-    byte     zero                        :  4;
-};
-*/
-
-struct transmit_status_vector {
-    uint8_t bytes[7];
-};
-
-#if ETHERCARD_SEND_PIPELINING
-    #define BREAKORCONTINUE retry=0; continue;
-#else
-    #define BREAKORCONTINUE break;
-#endif
-
 void ENC28J60::packetSend(uint16_t len) {
-    byte retry = 0;
-
-    #if ETHERCARD_SEND_PIPELINING
-        goto resume_last_transmission;
-    #endif
-    while (1) {
-        // latest errata sheet: DS80349C 
-        // always reset transmit logic (Errata Issue 12)
-        // the Microchip TCP/IP stack implementation used to first check
-        // whether TXERIF is set and only then reset the transmit logic
-        // but this has been changed in later versions; possibly they
-        // have a reason for this; they don't mention this in the errata 
-        // sheet
+    // see http://forum.mysensors.org/topic/536/
+    // while (readOp(ENC28J60_READ_CTRL_REG, ECON1) & ECON1_TXRTS)
+    if (readRegByte(EIR) & EIR_TXERIF) {
         writeOp(ENC28J60_BIT_FIELD_SET, ECON1, ECON1_TXRST);
-        writeOp(ENC28J60_BIT_FIELD_CLR, ECON1, ECON1_TXRST); 
-        writeOp(ENC28J60_BIT_FIELD_CLR, EIR, EIR_TXERIF|EIR_TXIF);
-   
-        // prepare new transmission 
-        if (retry == 0) {
-            writeReg(EWRPT, TXSTART_INIT);
-            writeReg(ETXND, TXSTART_INIT+len);
-            writeOp(ENC28J60_WRITE_BUF_MEM, 0, 0x00);
-            writeBuf(len, buffer);
-        }
-   
-        // initiate transmission
-        writeOp(ENC28J60_BIT_FIELD_SET, ECON1, ECON1_TXRTS);
-        #if ETHERCARD_SEND_PIPELINING
-            if (retry == 0) return;
-        #endif
-
-    resume_last_transmission:
-
-        // wait until transmission has finished; referrring to the data sheet and 
-        // to the errata (Errata Issue 13; Example 1) you only need to wait until either 
-        // TXIF or TXERIF gets set; however this leads to hangs; apparently Microchip
-        // realized this and in later implementations of their tcp/ip stack they introduced 
-        // a counter to avoid hangs; of course they didn't update the errata sheet 
-        uint16_t count = 0;
-        while ((readRegByte(EIR) & (EIR_TXIF | EIR_TXERIF)) == 0 && ++count < 1000U)
-            ;
-   
-        if (!(readRegByte(EIR) & EIR_TXERIF) && count < 1000U) {
-            // no error; start new transmission
-            BREAKORCONTINUE
-        }
-   
-        // cancel previous transmission if stuck
-        writeOp(ENC28J60_BIT_FIELD_CLR, ECON1, ECON1_TXRTS); 
-    
-    #if ETHERCARD_RETRY_LATECOLLISIONS == 0
-        BREAKORCONTINUE
-    #endif
-
-        // Check whether the chip thinks that a late collision ocurred; the chip
-        // may be wrong (Errata Issue 13); therefore we retry. We could check
-        // LATECOL in the ESTAT register in order to find out whether the chip
-        // thinks a late collision ocurred but (Errata Issue 15) tells us that
-        // this is not working. Therefore we check TSV
-        transmit_status_vector tsv;   
-        uint16_t etxnd = readReg(ETXND);
-        writeReg(ERDPT, etxnd+1);
-        readBuf(sizeof(transmit_status_vector), (byte*) &tsv);
-        // LATECOL is bit number 29 in TSV (starting from 0)
-
-        if (!((readRegByte(EIR) & EIR_TXERIF) && (tsv.bytes[3] & 1<<5) /*tsv.transmitLateCollision*/) || retry > 16U) {
-            // there was some error but no LATECOL so we do not repeat
-            BREAKORCONTINUE
-        }
-        
-        retry++;
+        writeOp(ENC28J60_BIT_FIELD_CLR, ECON1, ECON1_TXRST);
+        writeOp(ENC28J60_BIT_FIELD_CLR, EIR, EIR_TXERIF);
     }
+    writeReg(EWRPT, TXSTART_INIT);
+    writeReg(ETXND, TXSTART_INIT+len);
+    writeOp(ENC28J60_WRITE_BUF_MEM, 0, 0x00);
+    writeBuf(len, buffer);
+    writeOp(ENC28J60_BIT_FIELD_SET, ECON1, ECON1_TXRTS);
 }
 
-
 uint16_t ENC28J60::packetReceive() {
-    static uint16_t gNextPacketPtr = RXSTART_INIT;
     uint16_t len = 0;
     if (readRegByte(EPKTCNT) > 0) {
         writeReg(ERDPT, gNextPacketPtr);
@@ -558,7 +454,7 @@ uint16_t ENC28J60::packetReceive() {
         else
             readBuf(len, buffer);
         buffer[len] = 0;
-        if (gNextPacketPtr == 0) 
+        if (gNextPacketPtr - 1 > RXSTOP_INIT)
             writeReg(ERXRDPT, RXSTOP_INIT);
         else
             writeReg(ERXRDPT, gNextPacketPtr - 1);
@@ -630,25 +526,11 @@ void ENC28J60::disableMulticast () {
     writeRegByte(ERXFCON, readRegByte(ERXFCON) & ~ERXFCON_MCEN);
 }
 
-void ENC28J60::enablePromiscuous (bool temporary) {
-    writeRegByte(ERXFCON, readRegByte(ERXFCON) & ERXFCON_CRCEN);
-    if(!temporary)
-        promiscuous_enabled = true;
-}
-
-void ENC28J60::disablePromiscuous (bool temporary) {
-    if(!temporary)
-        promiscuous_enabled = false;
-    if(!promiscuous_enabled) {
-        writeRegByte(ERXFCON, ERXFCON_UCEN|ERXFCON_CRCEN|ERXFCON_PMEN|ERXFCON_BCEN);
-    }
-}
-
 uint8_t ENC28J60::doBIST ( byte csPin) {
-#define RANDOM_FILL     0b0000
+#define RANDOM_FILL        0b0000
 #define ADDRESS_FILL    0b0100
-#define PATTERN_SHIFT   0b1000
-#define RANDOM_RACE     0b1100
+#define PATTERN_SHIFT    0b1000
+#define RANDOM_RACE        0b1100
 
 // init
     if (bitRead(SPCR, SPE) == 0)

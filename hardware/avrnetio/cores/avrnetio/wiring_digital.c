@@ -21,7 +21,7 @@
 
   Modified 28 September 2010 by Mark Sproul
 
-  $Id: wiring.c 248 2007-02-03 15:36:30Z mellis $
+  $Id$
 */
 
 #define ARDUINO_MAIN
@@ -34,7 +34,7 @@ void pinMode(uint8_t pin, uint8_t mode)
 	uint8_t port = digitalPinToPort(pin);
 	volatile uint8_t *reg, *out;
 
-	if (port == NOT_A_PIN) return;
+	if (port == NOT_A_PORT) return;
 
 	// JWS: can I let the optimizer do this?
 	reg = portModeRegister(port);
@@ -94,9 +94,11 @@ static void turnOffPWM(uint8_t timer)
 		
 		#if defined(TCCR0A) && defined(COM0A1)
 		case  TIMER0A:  cbi(TCCR0A, COM0A1);    break;
+		#elif defined(TCCR0) && defined(COM01)
+		case  TIMER0A:  cbi(TCCR0, COM01);    break;
 		#endif
 		
-		#if defined(TIMER0B) && defined(COM0B1)
+		#if defined(TCCR0A) && defined(COM0B1)
 		case  TIMER0B:  cbi(TCCR0A, COM0B1);    break;
 		#endif
 		#if defined(TCCR2A) && defined(COM2A1)
@@ -129,7 +131,12 @@ static void turnOffPWM(uint8_t timer)
 		case TIMER4D:	cbi(TCCR4C, COM4D1);	break;
 		#endif			
 			
-		#if defined(TCCR5A)
+                #if defined(TCCR4C) && defined(COM4D1) && defined(PWM4D)
+	        case TIMER4D:   cbi(TCCR4C, COM4D1);    break;
+                #elif defined(TCCR4A) && defined(COM4D1)
+	        case TIMER4D:   cbi(TCCR4A, COM4D1);    break;
+		#endif
+ 		#if defined(TCCR5A)
 		case  TIMER5A:  cbi(TCCR5A, COM5A1);    break;
 		case  TIMER5B:  cbi(TCCR5A, COM5B1);    break;
 		case  TIMER5C:  cbi(TCCR5A, COM5C1);    break;
@@ -144,7 +151,7 @@ void digitalWrite(uint8_t pin, uint8_t val)
 	uint8_t port = digitalPinToPort(pin);
 	volatile uint8_t *out;
 
-	if (port == NOT_A_PIN) return;
+	if (port == NOT_A_PORT) return;
 
 	// If the pin that support PWM output, we need to turn it off
 	// before doing a digital write.
@@ -170,7 +177,7 @@ int digitalRead(uint8_t pin)
 	uint8_t bit = digitalPinToBitMask(pin);
 	uint8_t port = digitalPinToPort(pin);
 
-	if (port == NOT_A_PIN) return LOW;
+	if (port == NOT_A_PORT) return LOW;
 
 	// If the pin that support PWM output, we need to turn it off
 	// before getting a digital reading.

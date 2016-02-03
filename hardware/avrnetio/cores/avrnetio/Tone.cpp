@@ -39,17 +39,42 @@ Version Modified By Date     Comments
 #include "Arduino.h"
 #include "pins_arduino.h"
 
-#if defined(__AVR_ATmega8__) || defined(__AVR_ATmega128__)
-#define TCCR2A TCCR2
-#define TCCR2B TCCR2
-#define COM2A1 COM21
-#define COM2A0 COM20
-#define OCR2A OCR2
-#define TIMSK2 TIMSK
-#define OCIE2A OCIE2
-#define TIMER2_COMPA_vect TIMER2_COMP_vect
-#define TIMSK1 TIMSK
+#if !defined(TCCR2A) && defined(TCCR2)
+#define	TCCR2A	TCCR2
 #endif
+
+#if !defined(TCCR2B) && defined(TCCR2)
+#define	TCCR2B	TCCR2
+#endif
+
+#if !defined(COM2A1) && defined(COM21)
+#define	COM2A1	COM21
+#endif
+
+#if !defined(COM2A0) && defined(COM20)
+#define	COM2A0	COM20
+#endif
+
+#if !defined(OCR2A) && defined(OCR2)
+#define	OCR2A	OCR2
+#endif
+
+#if !defined(TIMSK2) && defined(TIMSK)
+#define	TIMSK2	TIMSK
+#endif
+
+#if !defined(OCIE2A) && defined(OCIE2)
+#define	OCIE2A	OCIE2
+#endif
+
+#if !defined(TIMER2_COMPA_vect) && defined(TIMER2_COMP_vect)
+#define	TIMER2_COMPA_vect TIMER2_COMP_vect	
+#endif
+
+#if !defined(TIMSK1) && defined(TIMSK)
+#define	TIMSK1	TIMSK
+#endif
+
 
 // timerx_toggle_count:
 //  > 0 - duration specified
@@ -209,7 +234,7 @@ static int8_t toneBegin(uint8_t _pin)
         #if defined(WGM42)
           bitWrite(TCCR4B, WGM42, 1);
         #elif defined(CS43)
-          #warning this may not be correct
+          // TODO this may not be correct
           // atmega32u4
           bitWrite(TCCR4B, CS43, 1);
         #endif
@@ -485,6 +510,7 @@ void noTone(uint8_t _pin)
     if (tone_pins[i] == _pin) {
       _timer = pgm_read_byte(tone_pin_to_timer_PGM + i);
       tone_pins[i] = 255;
+      break;
     }
   }
   

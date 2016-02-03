@@ -12,4 +12,4 @@ proc process {device data} {
   }
 }
 
-Jm rev {$Id: highside.tcl 7708 2011-06-05 20:28:21Z jcw $}
+Jm rev {$Id$}

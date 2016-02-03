@@ -23,4 +23,4 @@ proc process {device data} {
   report $data lobat $b -desc "low battery" -unit (0-1)
 }
 
-Jm rev {$Id: roomNode.tcl 7638 2011-04-27 23:05:52Z jcw $}
+Jm rev {$Id$}

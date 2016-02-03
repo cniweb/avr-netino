@@ -283,7 +283,7 @@ static void putch(byte c) {
             }
         }
     } else {
-        Serial.print((char) c);
+        Serial.print(c);
         if (mode == RECORDING)
             record(OUTPUT, c);
     }

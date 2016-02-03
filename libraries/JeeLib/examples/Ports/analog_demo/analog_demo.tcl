@@ -22,4 +22,4 @@ proc process {device data} {
   set value [format {%.5f V} [expr {$v * 1e-6}]]
 }
 
-Jm rev {$Id: analog_demo.tcl 7637 2011-04-27 23:05:26Z jcw $}
+Jm rev {$Id$}

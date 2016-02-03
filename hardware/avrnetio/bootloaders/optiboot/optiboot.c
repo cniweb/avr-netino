@@ -3,8 +3,13 @@
 /*                                                        */
 /* http://optiboot.googlecode.com                         */
 /*                                                        */
-/* Arduino-maintained version : See README.TXT            */
-/* http://code.google.com/p/arduino/                      */
+/* 2011-02-06 Modifications for AVR-Net-IO (avr-netino)   */
+/* by M.Maassen <mic.maassen@gmail.com>                   */
+/* added ATmega32 and ATmega644(P)                        */
+/* put all board specific stuff including LED definitions */
+/* in the Makefile via LED_B/LED_P and remove pin_def.h   */
+/*                                                        */
+/* http://avr-netino.googlecode.com                       */
 /*                                                        */
 /* Heavily optimised bootloader that is faster and        */
 /* smaller than the Arduino standard bootloader           */
@@ -33,7 +38,8 @@
 /*   ATmega1280 based devices (Arduino Mega)              */
 /*                                                        */
 /* Work in progress:                                      */
-/*   ATmega644P based devices (Sanguino)                  */
+/*   ATmega644P based devices (Sanguino/AVR-Net-IO)       */
+/*   ATmega644/32 based devices (AVR-Net-IO)              */
 /*   ATtiny84 based devices (Luminet)                     */
 /*                                                        */
 /* Does not support:                                      */
@@ -50,7 +56,7 @@
 /*                                                        */
 /* Code builds on code, libraries and optimisations from: */
 /*   stk500boot.c          by Jason P. Kyle               */
-/*   Arduino bootloader    http://www.arduino.cc          */
+/*   Arduino bootloader    http://arduino.cc              */
 /*   Spiff's 1K bootloader http://spiffie.org/know/arduino_1k_bootloader/bootloader.shtml */
 /*   avr-libc project      http://nongnu.org/avr-libc     */
 /*   Adaboot               http://www.ladyada.net/library/arduino/bootloader.html */
@@ -105,6 +111,16 @@
 /* Flash LED when transferring data. For boards without   */
 /* TX or RX LEDs, or for people who like blinky lights.   */
 /*                                                        */
+/* LED,LED_DDR,LED_PORT|LED_PIN                           */
+/* or for short: LED_B LED_P                              */
+/* These must be defined, if LED_START_FLASHES or         */
+/* LED_DATA_FLASH is set.                                 */
+/*                                                        */
+/* BL,BL_PIN or BL_P and BL_B:                            */
+/* specify PIN port and Bit to force/skip bootloader      */
+/*                                                        */
+/* HAVE_PIN_DEFS to use pin_defs.h                        */
+/*                                                        */
 /* SUPPORT_EEPROM:                                        */
 /* Support reading and writing from EEPROM. This is not   */
 /* used by Arduino, so off by default.                    */
@@ -143,15 +159,21 @@
 /* 4.1 WestfW: put version number in binary.		  */
 /**********************************************************/
 
+// on some avrs (ie. 164p/324p) we need to save some space
+#ifdef BIG_BOOT
+#define STK_UNIVERSAL_SIGNATURE
+#endif	/* BIG_BOOT */
+
 #define OPTIBOOT_MAJVER 4
 #define OPTIBOOT_MINVER 4
-
+#if defined (OPTIBOOT_MAJVER) && defined (OPTIBOOT_MINVER) 
 #define MAKESTR(a) #a
 #define MAKEVER(a, b) MAKESTR(a*256+b)
 
 asm("  .section .version\n"
     "optiboot_version:  .word " MAKEVER(OPTIBOOT_MAJVER, OPTIBOOT_MINVER) "\n"
     "  .section .text\n");
+#endif
 
 #include <inttypes.h>
 #include <avr/io.h>
@@ -164,24 +186,53 @@ asm("  .section .version\n"
 
 // We don't use <avr/wdt.h> as those routines have interrupt overhead we don't need.
 
+#ifdef HAVE_PIN_DEFS
 #include "pin_defs.h"
+#endif
+
 #include "stk500.h"
 
+#define _REG(x,y) _CAT(x,y)
+#define _CAT(x,y)  x##y
+#if defined ( LED_B ) && defined ( LED_P )
+#define LED_DDR  _REG(DDR,LED_P)
+#define LED_PORT _REG(PORT,LED_P)
+#if defined(__AVR_ATmega168P__) || defined(__AVR_ATmega168__) || defined(__AVR_ATmega328P__) || defined(__AVR_ATmega164P__) || defined(__AVR_ATmega324P__) || defined(__AVR_ATmega48__) || defined(__AVR_ATmega88__)
+#define LED_PIN  _REG(PIN,LED_P)
+#endif	/* can toggle pin with write ti PINx */
+#define LED      _REG(PIN,_REG(LED_P,LED_B))
+#define LED_PGM  _REG(PIN,_REG(LED_P,LED_B))
+#endif
+
 #ifndef LED_START_FLASHES
+#ifdef  NUM_LED_FLASHES
+#define LED_START_FLASHES NUM_LED_FLASHES
+#else
 #define LED_START_FLASHES 0
+#endif
+#endif
+
+#if ! defined( LED_DATA_FLASH ) && defined( LED_PGM )
+#define LED_DATA_FLASH
+#endif
+
+#if defined(BL_P) && defined(BL_B)
+#define BL_PIN  _REG(PIN,BL_P)
+#define BL      _REG(PIN,_REG(BL_P,BL_B))
 #endif
 
 #ifdef LUDICROUS_SPEED
 #define BAUD_RATE 230400L
 #endif
 
+
 /* set the UART baud rate defaults */
 #ifndef BAUD_RATE
 #if F_CPU >= 8000000L
 #define BAUD_RATE   115200L // Highest rate Avrdude win32 will support
-#elsif F_CPU >= 1000000L
+#elif F_CPU >= 1000000L
 #define BAUD_RATE   9600L   // 19200 also supported, but with significant error
-#elsif F_CPU >= 128000L
+#elif F_CPU >= 128000L
 #define BAUD_RATE   4800L   // Good for 128kHz internal RC
 #else
 #define BAUD_RATE 1200L     // Good even at 32768Hz
@@ -189,9 +240,31 @@ asm("  .section .version\n"
 #endif
 
 /* Switch in soft UART for hard baud rates */
-#if (F_CPU/BAUD_RATE) > 280 // > 57600 for 16MHz
+#if (F_CPU/BAUD_RATE) > 280 // < 57600 for 16MHz
 #ifndef SOFT_UART
 #define SOFT_UART
+#endif
+#endif
+
+/* Ports for soft UART */
+#ifdef SOFT_UART
+#ifndef UART_P
+#define UART_P	D
+#endif
+#ifndef UART_PORT
+#define UART_PORT   _REG(PORT,UART_P)
+#endif
+#ifndef UART_PIN
+#define UART_PIN    _REG(PIN,UART_P)
+#endif
+#ifndef UART_DDR
+#define UART_DDR    _REG(DDR,UART_P)
+#endif
+#ifndef UART_TX_BIT
+#define UART_TX_BIT 1
+#endif
+#ifndef UART_RX_BIT
+#define UART_RX_BIT 0
 #endif
 #endif
 
@@ -205,9 +278,59 @@ asm("  .section .version\n"
 #define WATCHDOG_500MS  (_BV(WDP2) | _BV(WDP0) | _BV(WDE))
 #define WATCHDOG_1S     (_BV(WDP2) | _BV(WDP1) | _BV(WDE))
 #define WATCHDOG_2S     (_BV(WDP2) | _BV(WDP1) | _BV(WDP0) | _BV(WDE))
-#ifndef __AVR_ATmega8__
+#ifdef WDE3
 #define WATCHDOG_4S     (_BV(WDP3) | _BV(WDE))
 #define WATCHDOG_8S     (_BV(WDP3) | _BV(WDP0) | _BV(WDE))
+#endif
+
+#if TIMEOUT_MS == 500
+#define WATCHDOG_DFT    WATCHDOG_500MS
+#elif TIMEOUT_MS == 1000
+#define WATCHDOG_DFT    WATCHDOG_1S
+#elif TIMEOUT_MS == 2000
+#define WATCHDOG_DFT    WATCHDOG_2S
+#elif TIMEOUT_MS == 3000
+#define WATCHDOG_DFT    WATCHDOG_4S
+#elif TIMEOUT_MS == 8000
+#define WATCHDOG_DFT    WATCHDOG_8S
+#else
+#define WATCHDOG_DFT    WATCHDOG_1S
+#endif
+
+/* Watch dog register names for old ATmegas */
+#if !defined ( MCUSR ) && defined ( MCUCSR )
+#define MCUSR  MCUCSR
+#endif
+#if !defined ( WDTCSR ) && defined ( WDTCR )
+#define WDTCSR WDTCR		/* m32 */
+#endif
+#if !defined ( WDCE ) && defined ( WDTOE )
+#define WDCE WDTOE
+#endif
+
+/* USART register names for old ATmegas */
+#if !defined ( UCSR0A ) && defined ( UCSRA ) 
+#define	UCSR0A	 UCSRA
+#endif
+
+#if !defined ( UDR0 ) && defined ( UDR )
+#define	UDR0	 UDR
+#endif
+
+#if !defined ( UDRE0 ) && defined ( UDRE )
+#define	UDRE0	 UDRE
+#endif
+
+#if !defined ( RXC0 ) && defined ( RXC )
+#define	RXC0	 RXC
+#endif
+
+#if !defined ( FE0 ) && defined ( FE )
+#define	FE0	 FE
+#endif
+
+#if !defined ( TIFR1 ) && defined ( TIFR )
+#define	TIFR1	 TIFR
 #endif
 
 /* Function Prototypes */
@@ -219,7 +342,9 @@ void putch(char);
 uint8_t getch(void);
 static inline void getNch(uint8_t); /* "static inline" is a compiler hint to reduce code size */
 void verifySpace();
+#if LED_START_FLASHES > 0
 static inline void flash_led(uint8_t);
+#endif
 uint8_t getLen();
 static inline void watchdogReset();
 void watchdogConfig(uint8_t x);
@@ -228,25 +353,40 @@ void uartDelay() __attribute__ ((naked));
 #endif
 void appStart() __attribute__ ((naked));
 
-#if defined(__AVR_ATmega168__)
-#define RAMSTART (0x100)
-#define NRWWSTART (0x3800)
-#elif defined(__AVR_ATmega328P__)
-#define RAMSTART (0x100)
-#define NRWWSTART (0x7000)
-#elif defined (__AVR_ATmega644P__)
-#define RAMSTART (0x100)
-#define NRWWSTART (0xE000)
-#elif defined(__AVR_ATtiny84__)
-#define RAMSTART (0x100)
-#define NRWWSTART (0x0000)
-#elif defined(__AVR_ATmega1280__)
-#define RAMSTART (0x200)
-#define NRWWSTART (0xE000)
-#elif defined(__AVR_ATmega8__) || defined(__AVR_ATmega88__)
-#define RAMSTART (0x100)
+
+/************************************************************
+ * the following is at least true for:
+ * ATmega48A/48PA/88A/88PA/168A/168PA/328/328P
+ * ATmega164A/164PA/324A/324PA/644A/644PA/1284/1284P
+ * ATmega640/1280/1281/2560/2561
+ * ATmega8/32A/16(L)162(V)
+ ************************************************************/
+#ifdef NRWWSTART
+/* defined in Makefile */
+#elif FLASHEND == 0x1FFF		/* 8k */
 #define NRWWSTART (0x1800)
+#elif FLASHEND == 0x3FFF		/* 16k */
+#define NRWWSTART (0x3800)
+#elif FLASHEND == 0x7FFF		/* 32k */
+#define NRWWSTART (0x7000)
+#elif FLASHEND == 0xFFFF		/* 64k */
+#define NRWWSTART (0xE000)
+#elif FLASHEND == 0x1FFFF		/* 128k */
+#define NRWWSTART (0x1E000)
+#elif FLASHEND == 0x3FFFF		/* 256k */
+#define NRWWSTART (0x3E000)
+#else
+#define NRWWSTART (0x0000)	/* disable background page erase */
 #endif
+
+#ifdef RAMSTART
+/* defined in Makefile */
+#elif defined(__AVR_ATmega640__) || defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__) || defined(__AVR_ATmega1281__) || defined(__AVR_ATmega2561__)
+#define RAMSTART (0x200)
+#else
+#define RAMSTART (0x100)
+#endif
+
 
 /* C zero initialises all global variables. However, that requires */
 /* These definitions are NOT zero initialised, but that doesn't matter */
@@ -279,42 +419,61 @@ int main(void) {
   //
   // If not, uncomment the following instructions:
   // cli();
+  asm volatile ("cli");
+
+
+  /*
+   * Since we've supressed the normal startup code, we have to initialize
+   * A1 (__zero_reg__) so that it will contain 0 as expected.  Apparently
+   * there is no guarantee that GP regs are clear on either PWRUP or RST.
+   */
   asm volatile ("clr __zero_reg__");
-#ifdef __AVR_ATmega8__
-  SP=RAMEND;  // This is done by hardware reset
+#if defined(__AVR_ATmega8__) || defined(__AVR_ATmega16__) || defined(__AVR_ATmega32__) 
+  SP=RAMEND;  // This is done by hardware reset on newer AVRs
 #endif
 
   // Adaboot no-wait mod
   ch = MCUSR;
   MCUSR = 0;
+#ifdef BL
+  if (!(ch & _BV(EXTRF)) && (BL_PIN & _BV(BL))) appStart();
+#else
   if (!(ch & _BV(EXTRF))) appStart();
+#endif	/* BL */
 
-#if LED_START_FLASHES > 0
+#if (LED_START_FLASHES > 0) && defined(TCCR1B) 
   // Set up Timer 1 for timeout counter
   TCCR1B = _BV(CS12) | _BV(CS10); // div 1024
 #endif
 #ifndef SOFT_UART
-#ifdef __AVR_ATmega8__
+#ifdef UCSRA
   UCSRA = _BV(U2X); //Double speed mode USART
   UCSRB = _BV(RXEN) | _BV(TXEN);  // enable Rx & Tx
+#ifdef URSEL
   UCSRC = _BV(URSEL) | _BV(UCSZ1) | _BV(UCSZ0);  // config USART; 8N1
+#else
+  UCSRC = _BV(UCSZ1) | _BV(UCSZ0);  // config USART; 8N1
+#endif	/* URSEL */
   UBRRL = (uint8_t)( (F_CPU + BAUD_RATE * 4L) / (BAUD_RATE * 8L) - 1 );
 #else
   UCSR0A = _BV(U2X0); //Double speed mode USART0
   UCSR0B = _BV(RXEN0) | _BV(TXEN0);
   UCSR0C = _BV(UCSZ00) | _BV(UCSZ01);
   UBRR0L = (uint8_t)( (F_CPU + BAUD_RATE * 4L) / (BAUD_RATE * 8L) - 1 );
-#endif
-#endif
+#endif /* UCSRA */
+#endif /* SOFT_UART */
 
   // Set up watchdog to trigger after 500ms
-  watchdogConfig(WATCHDOG_1S);
+  watchdogConfig(WATCHDOG_DFT);
 
   /* Set LED pin as output */
+#if defined(LED_DATA_FLASH) || (LED_START_FLASHES > 0)
   LED_DDR |= _BV(LED);
+#endif
 
 #ifdef SOFT_UART
-  /* Set TX pin as output */
+  /* Set TX pin as output and hi */
+  UART_PORT |= _BV(UART_TX_BIT);
   UART_DDR |= _BV(UART_TX_BIT);
 #endif
 
@@ -329,6 +488,7 @@ int main(void) {
     ch = getch();
 
     if(ch == STK_GET_PARAMETER) {
+#if defined(OPTIBOOT_MAJVER) && defined (OPTIBOOT_MINVER)
       unsigned char which = getch();
       verifySpace();
       if (which == 0x82) {
@@ -345,6 +505,10 @@ int main(void) {
 	 */
 	putch(0x03);
       }
+#else
+      getNch(1);
+      putch(0x03);
+#endif	/* OPTIBOOT_VER */
     }
     else if(ch == STK_SET_DEVICE) {
       // SET DEVICE is ignored
@@ -369,8 +533,27 @@ int main(void) {
     }
     else if(ch == STK_UNIVERSAL) {
       // UNIVERSAL command is ignored
+#ifdef STK_UNIVERSAL_SIGNATURE
+      uint8_t u1,u2;
+      u1 =  getch();
+      getch();
+      u2 =  getch();
+      getNch(1);
+      if (u1 == 0x30) {
+	if (u2 == 0) {
+	  putch(SIGNATURE_0);
+	} else if (u2 == 1) {
+	  putch(SIGNATURE_1); 
+	} else {
+	  putch(SIGNATURE_2);
+	} 
+      } else {
+	putch(0x00);
+      }
+#else
       getNch(4);
       putch(0x00);
+#endif
     }
     /* Write memory, length is big endian and is in bytes */
     else if(ch == STK_PROG_PAGE) {
@@ -415,8 +598,14 @@ int main(void) {
         buff[9] = vect >> 8;
 
         // Add jump to bootloader at RESET vector
+#ifdef BOOT_SEC
+	// BOOT_START = boot loader start address in bytes
+	buff[0] = ((BOOT_SEC-2)>>1) & 0xff;
+	buff[1] = 0xc0 | ((BOOT_SEC-2)>>9);
+#else
         buff[0] = 0x7f;
         buff[1] = 0xce; // rjmp 0x1d00 instruction
+#endif
       }
 #endif
 
@@ -534,7 +723,7 @@ uint8_t getch(void) {
   uint8_t ch;
 
 #ifdef LED_DATA_FLASH
-#ifdef __AVR_ATmega8__
+#ifndef LED_PIN
   LED_PORT ^= _BV(LED);
 #else
   LED_PIN |= _BV(LED);
@@ -565,6 +754,7 @@ uint8_t getch(void) {
     :
       "r25"
 );
+  watchdogReset();
 #else
   while(!(UCSR0A & _BV(RXC0)))
     ;
@@ -584,7 +774,7 @@ uint8_t getch(void) {
 #endif
 
 #ifdef LED_DATA_FLASH
-#ifdef __AVR_ATmega8__
+#ifndef LED_PIN 
   LED_PORT ^= _BV(LED);
 #else
   LED_PIN |= _BV(LED);
@@ -630,14 +820,24 @@ void verifySpace() {
 #if LED_START_FLASHES > 0
 void flash_led(uint8_t count) {
   do {
+#if defined(TCCR1B)
     TCNT1 = -(F_CPU/(1024*16));
     TIFR1 = _BV(TOV1);
     while(!(TIFR1 & _BV(TOV1)));
-#ifdef __AVR_ATmega8__
+#ifndef LED_PIN 
     LED_PORT ^= _BV(LED);
 #else
     LED_PIN |= _BV(LED);
 #endif
+#else  /* TCCR1B */
+    uint32_t abc;
+    for(abc=0;abc<(F_CPU/50);abc++) {
+      LED_PORT |= _BV(LED);
+    }
+    for(abc=0;abc<(F_CPU/50);abc++) {
+      LED_PORT &= ~_BV(LED);
+    }
+#endif  /* TCCR1B */
     watchdogReset();
   } while (--count);
 }
