@@ -4,3 +4,5 @@ This project summarizes some patches to the arduino core and bootloader to get t
 The philosophy behind my changes is to support many avr's in the core files and to concentrate the board specific details in one file. So porting to other hardware should be very easy. 
 
 Comments, suggestions and contributions are welcome!
+
+[![Build Status](https://travis-ci.org/cniweb/avr-netino.svg?branch=master)](https://travis-ci.org/cniweb/avr-netino)
