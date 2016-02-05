@@ -8,7 +8,7 @@ install:
 
 script:
   - cd ./hardware/avrnetio/bootloaders/optiboot/
-  ./makeall
+  - ./makeall
   - make -f ../atmega/Makefile anio
   - make -f ../atmega/Makefile boards.txt
   - make -f ../atmega/Makefile diecimila duemilanove
