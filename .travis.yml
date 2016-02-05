@@ -7,7 +7,10 @@ install:
   - sudo apt-get install -qq gcc-avr binutils-avr avr-libc
 
 script:
-  - make -f ./hardware/avrnetio/bootloaders/atmega/Makefile all
+  - cd ./hardware/avrnetio/bootloaders/optiboot/
+  - make -f ../atmega/Makefile anio
+  - make -f ../atmega/Makefile boards.txt
+  - make -f ../atmega/Makefile diecimila duemilanove
 
 notifications:
   email:
