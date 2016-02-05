@@ -8,9 +8,12 @@ install:
 
 script:
   - cd ./hardware/avrnetio/bootloaders/optiboot/
+  ./makeall
   - make -f ../atmega/Makefile anio
   - make -f ../atmega/Makefile boards.txt
   - make -f ../atmega/Makefile diecimila duemilanove
+  - ls
+  - cat boards.txt
 
 notifications:
   email:
