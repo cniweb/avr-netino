@@ -7,7 +7,6 @@ install:
   - sudo apt-get install -qq gcc-avr binutils-avr avr-libc
 
 script:
-  - echo $GH_TOKEN
   - export FILE_NAME=AVR-NETINO-$TRAVIS_BRANCH-HEX.tar
   - echo $FILE_NAME
   - cd ./hardware/avrnetio/bootloaders/optiboot/
@@ -23,7 +22,7 @@ deploy:
   file: 
     - $FILE_NAME
   on:
-    tags: true
+    tags: false
 
 notifications:
   email:
