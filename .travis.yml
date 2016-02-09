@@ -7,12 +7,22 @@ install:
   - sudo apt-get install -qq gcc-avr binutils-avr avr-libc
 
 script:
+  - export FILE_NAME=AVR-NETINO-$TRAVIS_BRANCH-HEX.tar
+  - echo $FILE_NAME
   - cd ./hardware/avrnetio/bootloaders/optiboot/
   - make -f ../atmega/Makefile anio
-  - make -f ../atmega/Makefile boards.txt
   - make -f ../atmega/Makefile diecimila duemilanove
-  - ls
-  - cat boards.txt
+  - tar -cvf $FILE_NAME ./*.hex
+  
+deploy:
+  skip_cleanup: true
+  provider: releases
+  api_key:
+    secure: $GH_TOKEN
+  file: 
+    - $FILE_NAME
+  on:
+    tags: true
 
 notifications:
   email:
