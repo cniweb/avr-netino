@@ -7,6 +7,7 @@ install:
   - sudo apt-get install -qq gcc-avr binutils-avr avr-libc
 
 script:
+  - travis setup releases
   - export FILE_NAME=AVR-NETINO-$TRAVIS_BRANCH-HEX.tar
   - echo $FILE_NAME
   - cd ./hardware/avrnetio/bootloaders/optiboot/
