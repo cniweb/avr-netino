@@ -5,4 +5,4 @@ The philosophy behind my changes is to support many avr's in the core files and 
 
 Comments, suggestions and contributions are welcome!
 
-[![Build Status](https://travis-ci.org/cniweb/avr-netino.svg?branch=master)](https://travis-ci.org/cniweb/avr-netino)
+Travis Build Status: [![Build Status](https://travis-ci.org/cniweb/avr-netino.svg?branch=master)](https://travis-ci.org/cniweb/avr-netino)
