@@ -22,7 +22,7 @@ deploy:
   file: 
     - $FILE_NAME
   on:
-    tags: false
+    tags: true
 
 notifications:
   email:
