@@ -2,6 +2,7 @@ language: c
 
 before_install:
   - sudo apt-get update -qq
+  - pip install codecov
 
 install:
   - sudo apt-get install -qq gcc-avr binutils-avr avr-libc
@@ -13,7 +14,10 @@ script:
   - make -f ../atmega/Makefile anio
   - make -f ../atmega/Makefile diecimila duemilanove
   - zip $FILE_NAME *.hex
-  
+
+after_success:
+  - codecov
+
 deploy:
   skip_cleanup: true
   provider: releases
