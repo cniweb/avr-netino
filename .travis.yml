@@ -2,6 +2,7 @@ language: c
 
 before_install:
   - sudo apt-get update -qq
+  - pip install --upgrade pip
   - pip install codecov
 
 install:
